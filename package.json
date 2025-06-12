@@ -1,0 +1,43 @@
+{
+  "name": "alt-text-ext",
+  "description": "Browser extension for automatically generating accessible alt text for images & videos using Google Gemini AI.",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npx wxt",
+    "dev:firefox": "npx wxt -b firefox",
+    "dev:chrome": "npx wxt -b chrome",
+    "dev:safari": "npx wxt -b safari",
+    "build": "npx wxt build",
+    "build:firefox": "npx wxt build -b firefox",
+    "build:chrome": "npx wxt build -b chrome --mv3",
+    "build:safari": "npx wxt build -b safari",
+    "build:unified": "npx wxt build -b chrome --mv3",
+    "cleanup:structure": "powershell -Command \"Copy-Item -Path .output/chrome-firefox-safari-mv3/chrome-mv3/* -Destination .output/chrome-firefox-safari-mv3/ -Recurse -Force; Remove-Item -Path .output/chrome-firefox-safari-mv3/chrome-mv3 -Recurse -Force; Remove-Item -Path .output/chrome-firefox-safari-mv3/*.zip -Force -ErrorAction SilentlyContinue\"",
+    "zip": "npx wxt zip",
+    "zip:chrome": "npx wxt zip -b chrome --mv3",
+    "zip:firefox": "npx wxt zip -b firefox",
+    "zip:safari": "npx wxt zip -b safari",
+    "zip:unified": "powershell -Command \"Set-Location -Path .output/chrome-firefox-safari-mv3; Remove-Item -Path ../../.output/alt-text-ext-chrome-firefox-safari-mv3.zip -Force -ErrorAction SilentlyContinue; Compress-Archive -Path * -DestinationPath ../../.output/alt-text-ext-chrome-firefox-safari-mv3.zip -Force\"",
+    "package:all": "npm run build:chrome && npm run build:firefox && npm run zip:chrome && npm run zip:firefox",
+    "package:unified": "npm run build:unified && npm run cleanup:structure && npm run zip:unified",
+    "compile": "tsc --noEmit",
+    "postinstall": "npx wxt prepare"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.313",
+    "@types/webextension-polyfill": "^0.12.3",
+    "@vitejs/plugin-react": "^4.4.1",
+    "@wxt-dev/auto-icons": "^1.0.2",
+    "typescript": "^5.8.3",
+    "wxt": "^0.20.6"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.15.5",
+    "@ffmpeg/core": "^0.11.0",
+    "@ffmpeg/ffmpeg": "^0.11.0",
+    "@playwright/test": "^1.53.0",
+    "webextension-polyfill": "^0.12.0"
+  }
+}
