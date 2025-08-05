@@ -589,19 +589,14 @@ async function processMediaWithUrl(
                 port.postMessage({ type: 'progress', message: `Compressing ${fileName} for processing...`, originalSrcUrl: mediaSrcUrl });
                 
                 try {
-                    // Use H.264 high quality compression from test-chunking.html as requested by user
-                    const fileSizeMB = blob.size / (1024 * 1024);
-                    
-                    // Always use H.264 high quality (CRF 22) as requested by user
-                    const compressionSettings: CompressionSettings = {
-                        codec: 'libx264',
-                        quality: 'high', // Use high quality setting (CRF 22) from test-chunking.html
+                    // Use simplified compression settings based on web client success
+                    const compressionSettings = {
                         maxSizeMB: 10 // Target 10MB for better upload reliability
                     };
                     
                     let compressionResult: CompressionResult | null = null;
                     
-                    // Try to use offscreen document first if available
+                    // Try to use offscreen document for compression
                     const hasOffscreen = await hasOffscreenDocument();
                     console.log(`[processMediaWithUrl] Offscreen document available: ${hasOffscreen}`);
                     
@@ -609,48 +604,65 @@ async function processMediaWithUrl(
                         try {
                             console.log(`[processMediaWithUrl] Starting offscreen compression for ${fileName}...`);
                             
-                            // Store file in IndexedDB for offscreen access instead of sending large ArrayBuffer
+                            // Store file in IndexedDB for offscreen access
                             const fileKey = `compression_${Date.now()}_${fileName}`;
                             await storeFileInDB(fileKey, file);
                             
                             console.log(`[processMediaWithUrl] File stored in IndexedDB: ${fileName} (${(file.size / (1024 * 1024)).toFixed(1)}MB)`);
                             
-                            // Send progress update with correct file size
+                            // Send progress update
                             port.postMessage({ 
                                 type: 'progress', 
                                 message: `Starting compression for ${fileName} (${(file.size / (1024 * 1024)).toFixed(1)}MB)`, 
                                 originalSrcUrl: mediaSrcUrl 
                             });
                             
-                            // Update compression settings to show correct file size in logs
-                            port.postMessage({ 
-                                type: 'progress', 
-                                message: `Settings: codec=${compressionSettings.codec}, quality=${compressionSettings.quality}, maxSizeMB=${compressionSettings.maxSizeMB}`, 
-                                originalSrcUrl: mediaSrcUrl 
+                            // Send compression request with proper timeout handling
+                            console.log(`[processMediaWithUrl] Sending compression message to offscreen document...`);
+                            
+                            const operationId = `compress_${Date.now()}`;
+                            
+                            // Set up response listener before sending message
+                            const responsePromise = new Promise<any>((resolve, reject) => {
+                                const responseTimeout = setTimeout(() => {
+                                    reject(new Error('Compression response timeout after 5 minutes'));
+                                }, 300000); // 5 minutes
+                                
+                                const messageListener = (message: any) => {
+                                    if (message.type === 'compressionComplete' && 
+                                        message.payload?.operationId === operationId) {
+                                        clearTimeout(responseTimeout);
+                                        browser.runtime.onMessage.removeListener(messageListener);
+                                        
+                                        if (message.payload.success) {
+                                            resolve(message.payload);
+                                        } else {
+                                            reject(new Error(message.payload.error || 'Compression failed'));
+                                        }
+                                    }
+                                };
+                                
+                                browser.runtime.onMessage.addListener(messageListener);
                             });
                             
-                            // Send compression request with timeout
-                            console.log(`[processMediaWithUrl] Sending compression message to offscreen document for ${fileName}...`);
+                            // Send compression message
+                            await browser.runtime.sendMessage({
+                                target: 'offscreen-ffmpeg',
+                                type: 'compressVideo',
+                                payload: {
+                                    operationId,
+                                    indexedDbKey: fileKey,
+                                    fileName: fileName,
+                                    mimeType: mediaType,
+                                    compressionSettings: compressionSettings,
+                                    fileSize: file.size
+                                }
+                            });
                             
-                            const response = await Promise.race([
-                                browser.runtime.sendMessage({
-                                    target: 'offscreen-ffmpeg',
-                                    type: 'compressVideo',
-                                    payload: {
-                                        operationId: `compress_${Date.now()}`,
-                                        indexedDbKey: fileKey, // Use IndexedDB key instead of fileData
-                                        fileName: fileName,
-                                        mimeType: mediaType,
-                                        compressionSettings: compressionSettings,
-                                        fileSize: file.size // Add explicit file size
-                                    }
-                                }),
-                                new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error('Compression timeout after 5 minutes')), 300000)
-                                )
-                            ]);
+                            console.log(`[processMediaWithUrl] Compression message sent, waiting for response...`);
                             
-                            console.log(`[processMediaWithUrl] Sent compression message to offscreen document for ${fileName}`);
+                            // Wait for response
+                            const response = await responsePromise;
                             
                             // Clean up IndexedDB after compression
                             try {
@@ -662,15 +674,15 @@ async function processMediaWithUrl(
                             
                             console.log(`[processMediaWithUrl] Offscreen compression response:`, response);
                             
-                            if (response && response.success) {
-                                const compressedBlob = new Blob([response.data], { type: 'video/webm' });
+                            if (response && response.success && response.data) {
+                                const compressedBlob = new Blob([response.data], { type: 'video/mp4' });
                                 compressionResult = {
                                     blob: compressedBlob,
                                     originalSize: response.originalSize,
                                     compressedSize: response.compressedSize,
                                     compressionRatio: response.compressionRatio,
-                                    codec: response.codec,
-                                    quality: response.quality
+                                    codec: response.codec || 'libx264',
+                                    quality: response.quality || 'adaptive'
                                 };
                                 console.log(`[processMediaWithUrl] Offscreen compression successful:`, {
                                     originalSize: response.originalSize,
@@ -678,25 +690,26 @@ async function processMediaWithUrl(
                                     compressionRatio: response.compressionRatio
                                 });
                             } else {
-                                console.warn('[Background] Offscreen compression failed:', response?.error);
-                                throw new Error(`Offscreen compression failed: ${response?.error || 'Unknown error'}`);
+                                throw new Error(`Offscreen compression failed: ${response?.error || 'Invalid response'}`);
                             }
                         } catch (offscreenError: any) {
                             console.warn('[Background] Offscreen compression error:', offscreenError.message);
+                            // Clean up IndexedDB if error occurred
+                            try {
+                                const fileKey = `compression_${Date.now()}_${fileName}`;
+                                await deleteFileFromDB(fileKey);
+                            } catch (cleanupError) {
+                                console.warn('[Background] Error during cleanup after compression failure:', cleanupError);
+                            }
                             throw offscreenError;
                         }
                     } else {
-                        console.log(`[processMediaWithUrl] No offscreen document available, trying direct compression...`);
-                    }
-                    
-                    // Fallback to direct compression if offscreen failed
-                    if (!compressionResult) {
-                        compressionResult = await compressVideo(file, compressionSettings);
+                        throw new Error('No offscreen document available for compression');
                     }
                     
                     if (compressionResult) {
                         processedBlob = compressionResult.blob;
-                        processedFileName = `compressed_${fileName.split('.')[0]}.webm`;
+                        processedFileName = `compressed_${fileName.split('.')[0]}.mp4`;
                         
                         const compressionRatio = ((1 - compressionResult.compressedSize / compressionResult.originalSize) * 100).toFixed(1);
                         port.postMessage({ 
@@ -712,7 +725,7 @@ async function processMediaWithUrl(
                 } catch (compressionError: any) {
                     console.warn(`[processMediaWithUrl] Compression failed for ${fileName}:`, compressionError.message);
                     port.postMessage({ type: 'warning', message: `Compression failed, processing original file...`, originalSrcUrl: mediaSrcUrl });
-                    // Continue with original file
+                    // Continue with original file if compression fails
                 }
             }
             
