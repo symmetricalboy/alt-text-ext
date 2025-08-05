@@ -219,9 +219,9 @@ const VideoProcessing = (function() {
         
         const qualityMap = { 'low': 0, 'medium': 1, 'high': 2 };
         
-        const h264_crf = [30, 26, 22]; // Low, Medium, High
-        const vp8_crf = [35, 30, 25];
-        const vp9_crf = [40, 35, 30];
+        const h264_crf = [28, 25, 22]; // Low, Medium, High - less aggressive
+        const vp8_crf = [33, 28, 25];  // Less aggressive for VP8 too
+        const vp9_crf = [38, 33, 28];  // Less aggressive for VP9 too
         
         let crf_value;
         let qualityIndex = qualityMap[quality];
@@ -244,6 +244,8 @@ const VideoProcessing = (function() {
                 crf_value = h264_crf[qualityIndex] || h264_crf[1];
                 if (stronger) crf_value += 4;
                 params.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', crf_value.toString());
+                // Force 8-bit output for maximum compatibility
+                params.push('-pix_fmt', 'yuv420p');
                 // Explicitly set format for H.264 to prevent misdetection as subtitle
                 params.push('-f', 'mp4');
                 break;
@@ -371,7 +373,7 @@ const VideoProcessing = (function() {
                         }
                         
                         // Add additional scaling to reduce resolution if needed
-                        finalParams.push('-vf', 'scale=\'min(1280,iw)\':\'min(720,ih)\':force_original_aspect_ratio=decrease');
+                        finalParams.push('-vf', 'scale=min(1280\\,iw):min(720\\,ih):force_original_aspect_ratio=decrease');
                     }
                     // For VP8/VP9, use lower quality settings
                     else {

@@ -144,24 +144,28 @@ async function handleCompression(fileData) {
         // Use the same quality settings as the successful web client
         const qualitySettings = {
             codec: 'libx264',
-            crf: 28,
-            preset: 'veryfast',
+            crf: 23,  // Higher quality starting point
+            preset: 'medium',  // Better quality preset
             audioBitrate: '128k',
             movflags: '+faststart',
             vf: []
         };
         
-        if (size > 50 * 1024 * 1024) {
-            console.log('[Offscreen] 📦 Very large file, using aggressive compression.');
-            qualitySettings.crf = 32;
-            qualitySettings.preset = 'ultrafast';
+        if (size > 100 * 1024 * 1024) {
+            console.log('[Offscreen] 📦 Very large file (>100MB), using moderate compression.');
+            qualitySettings.crf = 26;  // Much less aggressive
+            qualitySettings.preset = 'fast';
             qualitySettings.vf.push('fps=30');
-            qualitySettings.vf.push('scale=min(iw\\,1280):min(ih\\,720):force_original_aspect_ratio=decrease');
-        } else if (size > 20 * 1024 * 1024) {
-            console.log('[Offscreen] 📦 Large file, using stronger compression.');
-            qualitySettings.crf = 30;
-            qualitySettings.preset = 'faster';
             qualitySettings.vf.push('scale=min(iw\\,1920):min(ih\\,1080):force_original_aspect_ratio=decrease');
+        } else if (size > 50 * 1024 * 1024) {
+            console.log('[Offscreen] 📦 Large file (>50MB), using light compression.');
+            qualitySettings.crf = 25;  // Lighter compression
+            qualitySettings.preset = 'medium';
+            qualitySettings.vf.push('scale=min(iw\\,1920):min(ih\\,1080):force_original_aspect_ratio=decrease');
+        } else if (size > 20 * 1024 * 1024) {
+            console.log('[Offscreen] 📦 Medium file (>20MB), using gentle compression.');
+            qualitySettings.crf = 24;
+            qualitySettings.preset = 'medium';
         }
         
         qualitySettings.vf.push('scale=trunc(iw/2)*2:trunc(ih/2)*2');
@@ -169,6 +173,7 @@ async function handleCompression(fileData) {
         const ffmpegArgs = [
             '-i', name,
             '-c:v', qualitySettings.codec,
+            '-pix_fmt', 'yuv420p',
             '-crf', qualitySettings.crf.toString(),
             '-preset', qualitySettings.preset,
             '-c:a', 'aac',
